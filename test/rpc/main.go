@@ -16,9 +16,9 @@ func main() {
 		panic(client.ClientError)
 	}
 
-	result := client.Rpc("add_them", "", map[string]int{"a": 9, "b": 3})
-	if client.ClientError != nil {
-		panic(client.ClientError)
+	result, err := client.Rpc("add_them", "", map[string]int{"a": 9, "b": 3})
+	if err != nil {
+		panic(err)
 	}
 
 	fmt.Println(result)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -108,14 +109,13 @@ func (c *Client) From(table string) *QueryBuilder {
 
 // Rpc executes a Postgres function (a.k.a., Remote Prodedure Call), given the
 // function name and, optionally, a body, returning the result as a string.
-func (c *Client) Rpc(name string, count string, rpcBody interface{}) string {
+func (c *Client) Rpc(name string, count string, rpcBody interface{}) (string, error) {
 	// Get body if it exists
 	var byteBody []byte = nil
 	if rpcBody != nil {
 		jsonBody, err := json.Marshal(rpcBody)
 		if err != nil {
-			c.ClientError = err
-			return ""
+			return "", err
 		}
 		byteBody = jsonBody
 	}
@@ -124,8 +124,7 @@ func (c *Client) Rpc(name string, count string, rpcBody interface{}) string {
 	url := path.Join(c.Transport.baseURL.Path, "rpc", name)
 	req, err := http.NewRequest("POST", url, readerBody)
 	if err != nil {
-		c.ClientError = err
-		return ""
+		return "", err
 	}
 
 	if count != "" && (count == `exact` || count == `planned` || count == `estimated`) {
@@ -134,25 +133,27 @@ func (c *Client) Rpc(name string, count string, rpcBody interface{}) string {
 
 	resp, err := c.session.Do(req)
 	if err != nil {
-		c.ClientError = err
-		return ""
+		return "", err
 	}
 
+	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.ClientError = err
-		return ""
+		return "", err
 	}
 
-	result := string(body)
+	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		return string(body), nil
+	}
 
-	err = resp.Body.Close()
+	// Try to parse error info
+	restErr := RestError{}
+	err = json.Unmarshal(body, &restErr)
 	if err != nil {
-		c.ClientError = err
-		return ""
+		return "", fmt.Errorf("received status code %d invoking rpc but was unable to parse error details: %w", resp.StatusCode, err)
 	}
 
-	return result
+	return "", fmt.Errorf("received status code %d invoking rpc. Error explanation: %w", resp.StatusCode, &restErr)
 }
 
 type transport struct {
